@@ -53,13 +53,21 @@ def _split_schedule(value: str) -> Optional[dict]:
     if not time_part:
         return None
 
-    if prefix in WEEKDAY_ALIASES:
-        code, weekday = WEEKDAY_ALIASES[prefix]
+    day_tokens = prefix.split(',')
+    if all(t in WEEKDAY_ALIASES for t in day_tokens):
+        codes = []
+        weekdays = []
+        for t in day_tokens:
+            code, weekday = WEEKDAY_ALIASES[t]
+            if code not in codes:
+                codes.append(code)
+                weekdays.append(weekday)
         return {
             'type': 'weekly',
-            'weekday': weekday,
+            'weekday': weekdays[0],
+            'weekdays': weekdays,
             'time': time_part,
-            'normalized': f"{code} {time_part}",
+            'normalized': f"{','.join(codes)} {time_part}",
         }
     if prefix.startswith('day='):
         try:

@@ -466,7 +466,7 @@ async def process_scheduled_notifications(bot: Bot):
             logger.debug(f'Уведомление {notif_id} "{notif_title}": время не совпадает ({schedule.get("time")} != {current_time})')
             continue
         schedule_type = schedule.get('type', 'daily')
-        if schedule_type == 'weekly' and schedule.get('weekday') != now.weekday():
+        if schedule_type == 'weekly' and now.weekday() not in (schedule.get('weekdays') or [schedule.get('weekday')]):
             logger.debug(f'Уведомление {notif_id} "{notif_title}": день недели не совпадает (weekly)')
             continue
         if schedule_type == 'monthly_day' and schedule.get('day') != now.day:

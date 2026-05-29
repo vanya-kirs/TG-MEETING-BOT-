@@ -221,10 +221,9 @@ class Database:
 
     def delete_user_by_id(self, trainer_id: int):
         with self.connection:
-            # First delete from trainer_extra table if exists
             self._ensure_extra()
             self.cursor.execute("DELETE FROM trainer_extra WHERE trainer_id=?", (trainer_id,))
-            # Then delete from users table
+            self.cursor.execute("DELETE FROM queue_assignments WHERE trainer_id=?", (trainer_id,))
             return self.cursor.execute("DELETE FROM `users` WHERE id=?", (trainer_id,))
 
     def delete_user_by_user_id(self, user_id: int):
