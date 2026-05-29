@@ -176,7 +176,11 @@ def _format_schedule_display(schedule_str: str) -> str:
     }
     parts = schedule_str.split()
     if len(parts) == 2:
-        if parts[0] in weekday_map:
+        day_tokens = parts[0].split(',')
+        if all(t in weekday_map for t in day_tokens):
+            day_names = ', '.join(weekday_map[t] for t in day_tokens)
+            return f"{day_names} {parts[1]}"
+        elif parts[0] in weekday_map:
             return f"{weekday_map[parts[0]]} {parts[1]}"
         elif parts[0].startswith('day='):
             day_num = parts[0].replace('day=', '')
@@ -303,10 +307,19 @@ def _schedule_type_markup(mode: str) -> InlineKeyboardMarkup:
     return builder.adjust(1).as_markup()
 
 
-def _weekday_selection_markup(mode: str) -> InlineKeyboardMarkup:
+def _weekday_selection_text(selected: set[str]) -> str:
+    if not selected:
+        return 'Выберите дни недели для отправки уведомления.'
+    names = [label for label, code, _ in WEEKDAY_OPTIONS if code in selected]
+    return f'Выбранные дни: {", ".join(names)}\n\nНажмите «Готово» для подтверждения.'
+
+
+def _weekday_selection_markup(selected: set[str], mode: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for label, code, _ in WEEKDAY_OPTIONS:
-        builder.button(text=label, callback_data=f'notif|schedweekday|{mode}|{code}')
+        mark = '✅' if code in selected else '▫️'
+        builder.button(text=f'{mark} {label}', callback_data=f'notif|schedweekday|{mode}|{code}')
+    builder.button(text='Готово', callback_data=f'notif|weekdaydone|{mode}')
     builder.button(text='⬅️ Назад', callback_data=f'notif|schedcancel|{mode}')
     return builder.adjust(3).as_markup()
 
@@ -887,7 +900,7 @@ async def notifications_schedule_type(callback: CallbackQuery, state: FSMContext
     if sched_type == 'daily':
         await callback.message.edit_text('Выберите время отправки:', reply_markup=_time_selection_markup(mode))
     elif sched_type == 'weekly':
-        await callback.message.edit_text('Выберите день недели:', reply_markup=_weekday_selection_markup(mode))
+        await callback.message.edit_text(_weekday_selection_text(set()), reply_markup=_weekday_selection_markup(set(), mode))
     elif sched_type == 'monthday':
         await callback.message.edit_text('Выберите число месяца:', reply_markup=_day_of_month_markup(mode))
     elif sched_type == 'lastday':
@@ -910,7 +923,34 @@ async def notifications_schedule_weekday(callback: CallbackQuery, state: FSMCont
     if not flow:
         await callback.answer('Сначала выберите тип расписания.', show_alert=True)
         return
-    flow['weekday'] = weekday
+    selected = set(flow.get('weekdays', []))
+    if weekday in selected:
+        selected.discard(weekday)
+    else:
+        selected.add(weekday)
+    day_order = {code: i for _, code, i in WEEKDAY_OPTIONS}
+    flow['weekdays'] = sorted(selected, key=lambda c: day_order.get(c, 99))
+    await state.update_data(schedule_flow=flow)
+    await callback.message.edit_text(_weekday_selection_text(selected), reply_markup=_weekday_selection_markup(selected, mode))
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith('notif|weekdaydone|'))
+async def notifications_weekday_done(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in admins:
+        await callback.answer('Нет прав', show_alert=True)
+        return
+    _, _, mode = callback.data.split('|', 2)
+    data = await state.get_data()
+    flow = data.get('schedule_flow')
+    if not flow:
+        await callback.answer('Сначала выберите тип расписания.', show_alert=True)
+        return
+    weekdays = flow.get('weekdays', [])
+    if not weekdays:
+        await callback.answer('Выберите хотя бы один день.', show_alert=True)
+        return
+    flow['weekday'] = weekdays[0]
     await state.update_data(schedule_flow=flow)
     await callback.message.edit_text('Выберите время отправки:', reply_markup=_time_selection_markup(mode))
     await callback.answer()
@@ -1013,8 +1053,8 @@ async def notifications_schedule_time(callback: CallbackQuery, state: FSMContext
     if sched_type == 'daily':
         expression = time_value
     elif sched_type == 'weekly':
-        weekday = flow.get('weekday', 'mon')
-        expression = f"{weekday} {time_value}"
+        weekdays_list = flow.get('weekdays') or [flow.get('weekday', 'mon')]
+        expression = f"{','.join(weekdays_list)} {time_value}"
     elif sched_type == 'monthday':
         day = flow.get('day', 1)
         expression = f"day={day} {time_value}"
@@ -2154,13 +2194,24 @@ def _apply_email_records(records: list[tuple[str, str]] | None):
 async def sync_trainer_sheet_data(bot: Bot | None = None):
     if not sheets_service or not sheets_service.is_available():
         return
-    med_records = sheets_service.fetch_medical_records()
-    _apply_sheet_records(med_records, 'med')
-    qual_records = sheets_service.fetch_qualification_records()
-    _apply_sheet_records(qual_records, 'qual')
-    # Синхронизация email из столбца G
-    email_records = sheets_service.fetch_user_emails()
-    _apply_email_records(email_records)
+    loop = asyncio.get_event_loop()
+    try:
+        med_records = await asyncio.wait_for(
+            loop.run_in_executor(None, sheets_service.fetch_medical_records), timeout=30
+        )
+        _apply_sheet_records(med_records, 'med')
+        qual_records = await asyncio.wait_for(
+            loop.run_in_executor(None, sheets_service.fetch_qualification_records), timeout=30
+        )
+        _apply_sheet_records(qual_records, 'qual')
+        email_records = await asyncio.wait_for(
+            loop.run_in_executor(None, sheets_service.fetch_user_emails), timeout=30
+        )
+        _apply_email_records(email_records)
+    except asyncio.TimeoutError:
+        logger.error('sync_trainer_sheet_data: превышен таймаут 30с при обращении к Google Sheets')
+    except Exception as e:
+        logger.error(f'sync_trainer_sheet_data: ошибка — {e}')
 
 
 async def notify_trainer_expirations(bot: Bot):
@@ -2206,10 +2257,10 @@ async def delete_trainer_menu(message: types.Message):
     # Формируем текстовый список
     text_lines = [f"#{tid}: {name} (@{uname})" for tid, name, uname in trainers]
     text = 'Список тренеров:\n' + '\n'.join(text_lines) + '\n\nВыберите кого удалить:'
-    # Формируем инлайн-кнопки
+    # Формируем инлайн-кнопки (сортируем по номеру тренера)
     rows = []
     row = []
-    for idx, (tid, name, uname) in enumerate(trainers, start=1):
+    for idx, (tid, name, uname) in enumerate(sorted(trainers, key=lambda x: x[0]), start=1):
         row.append(InlineKeyboardButton(text=f"Удалить #{tid}", callback_data=f"del_tr_{tid}"))
         if idx % 2 == 0:  # две кнопки в ряд
             rows.append(row)
