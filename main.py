@@ -1,9 +1,11 @@
 import os
 import logging
+import traceback
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from aiogram import Bot, Dispatcher
@@ -52,11 +54,12 @@ console_handler.setFormatter(logging.Formatter(
 logging.getLogger().addHandler(console_handler)
 
 from aiogram.enums import ParseMode
-from handlers.admin_router import change_name1, notify_birthdays, yved_ikya_o_vstreche, sync_trainer_sheet_data, notify_trainer_expirations
+from handlers.admin_router import change_name1, notify_birthdays, yved_ikya_o_vstreche, sync_trainer_sheet_data, notify_trainer_expirations, admins
 from handlers.group_router import group_router, process_scheduled_notifications, cleanup_payment_thread_messages, notify_dev_birthday
 from handlers.admin_router import admin_router
 from handlers.user_router import user_router
 
+logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('TOKEN')
 
@@ -69,10 +72,27 @@ dp.include_router(group_router)
 dp.include_router(user_router)
 
 
+async def _notify_admins(text: str):
+    for admin_id in admins:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            pass
+
+
+@dp.errors()
+async def handle_error(event: ErrorEvent):
+    tb = ''.join(traceback.format_exception(type(event.exception), event.exception, event.exception.__traceback__))
+    short_tb = tb[-3500:]
+    update_info = f"update_id={event.update.update_id}" if event.update else "нет апдейта"
+    text = f"❌ <b>Ошибка в обработчике</b> ({update_info}):\n<pre>{short_tb}</pre>"
+    logger.error(f"Unhandled handler error: {event.exception}", exc_info=event.exception)
+    await _notify_admins(text)
+
+
 async def yvedomlenie(bot:Bot):
     mes=916539100
     await bot.send_message(mes, 'буй')
-
 
 
 async def main():
@@ -87,9 +107,13 @@ async def main():
     scheduler.add_job(notify_dev_birthday, trigger='cron', month=8, day=23, hour=9, minute=0, kwargs={'bot': bot})
     scheduler.start()
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-
-
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.critical(f"Bot crashed: {e}", exc_info=True)
+        await _notify_admins(f"💀 <b>Бот упал</b>:\n<pre>{tb[-3500:]}</pre>")
+        raise
 
 
 asyncio.run(main())
