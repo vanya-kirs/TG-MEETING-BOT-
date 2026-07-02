@@ -310,7 +310,7 @@ async def profil(message: types.Message):
     emp_type = db.get_employment_type(message.from_user.id)
     emp_type_text = 'Самозанятый' if emp_type == 'СЗ' else ('ИП' if emp_type == 'ИП' else 'Не указан')
     email = db.get_email(message.from_user.id) or 'Не указан'
-    profile_text = f'Ваше имя: {user_nickname}\nСтатус занятости: {emp_type_text}\nEmail: {email}'
+    profile_text = f'Ваше имя: {user_nickname or "Не указан"}\nСтатус занятости: {emp_type_text}\nEmail: {email}'
     await message.answer(profile_text, reply_markup=profile)
 
 

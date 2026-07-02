@@ -2310,15 +2310,10 @@ async def delete_trainer_cb(callback: CallbackQuery, bot: Bot):
         
         for group_name, group_id in registration_groups.items():
             try:
-                # Баним пользователя с until_date в прошлом - это удалит его из группы
-                await bot.ban_chat_member(
-                    chat_id=group_id,
-                    user_id=trainer_user_id,
-                    until_date=until_date,
-                    revoke_messages=False  # Не удаляем сообщения
-                )
+                await bot.ban_chat_member(chat_id=group_id, user_id=trainer_user_id, revoke_messages=False)
+                await bot.unban_chat_member(chat_id=group_id, user_id=trainer_user_id, only_if_banned=True)
                 removed_from_groups.append(group_name)
-                logger.info(f'Пользователь {trainer_user_id} удален из группы {group_name} (ID: {group_id})')
+                logger.info(f'Пользователь {trainer_user_id} кикнут из группы {group_name} (ID: {group_id})')
             except Exception as e:
                 failed_groups.append(group_name)
                 logger.error(f'Ошибка удаления пользователя {trainer_user_id} из группы {group_name} (ID: {group_id}): {e}', exc_info=True)

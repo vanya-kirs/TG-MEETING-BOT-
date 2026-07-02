@@ -74,8 +74,8 @@ class Database:
         with self.connection:
             result=self.cursor.execute("SELECT `signup` FROM `users` WHERE `user_id` = ?",(user_id,)).fetchall()
             for row in result:
-                signup=str(row[0])
-            return signup
+                return str(row[0])
+            return None
 
     def set_signup(self,user_id, signup):
         with self.connection:
@@ -85,8 +85,8 @@ class Database:
         with self.connection:
             result=self.cursor.execute("SELECT `nickname` FROM `users` WHERE `user_id` = ?",(user_id,)).fetchall()
             for row in result:
-                nickname=str(row[0])
-            return nickname
+                return str(row[0])
+            return None
 
     # ----- Username / Trainers management based on users -----
     def set_username(self, user_id, username):

@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -63,7 +64,11 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('TOKEN')
 
-bot=Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+_http_session = AiohttpSession()
+_http_session._connector_init['enable_cleanup_closed'] = True
+_http_session._connector_init['keepalive_timeout'] = 30
+
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML), session=_http_session)
 
 dp=Dispatcher()
 
@@ -73,11 +78,10 @@ dp.include_router(user_router)
 
 
 async def _notify_admins(text: str):
-    for admin_id in admins:
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception:
-            pass
+    try:
+        await bot.send_message(916539100, text)
+    except Exception:
+        pass
 
 
 @dp.errors()
@@ -108,7 +112,7 @@ async def main():
     scheduler.start()
     await bot.delete_webhook(drop_pending_updates=True)
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), polling_timeout=25)
     except Exception as e:
         tb = traceback.format_exc()
         logger.critical(f"Bot crashed: {e}", exc_info=True)
